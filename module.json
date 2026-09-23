@@ -1,0 +1,11 @@
+{
+  "id": "com.flickertalk.sketch",
+  "name": "Sketch",
+  "version": "1.0.0",
+  "minCoreVersion": "0.1.0",
+  "components": [
+    "ft-sketch"
+  ],
+  "permissions": {},
+  "summary": "Draw with a finger and send the drawing as a picture."
+}
