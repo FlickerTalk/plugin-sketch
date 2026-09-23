@@ -37,14 +37,19 @@ const INKS = ["#111111", "#d92b2b", "#1d6fd0", "#e2a400"];
 const NIBS = [4, 10, 22];
 
 const STYLE = `
-:host { display: block; font: 14px system-ui, sans-serif; color: #111; }
-@media (prefers-color-scheme: dark) { :host { color: #f4f4f4; } }
+:host { display: block; font: 14px system-ui, sans-serif; color: #111; --paper: #fff; }
+@media (prefers-color-scheme: dark) { :host { color: #f4f4f4; --paper: #111; } }
 .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0 10px; }
 button {
   appearance: none; border: 1px solid currentColor; background: transparent; color: inherit;
   border-radius: 10px; min-width: 44px; height: 40px; font-size: 18px; cursor: pointer; opacity: .75;
 }
 button.on { opacity: 1; box-shadow: inset 0 0 0 2px currentColor; }
+.i {
+  display: block; width: 22px; height: 22px; margin: auto; background: currentColor;
+  -webkit-mask: var(--i) center/contain no-repeat; mask: var(--i) center/contain no-repeat;
+}
+button.on .i { background: var(--paper); }
 .ink { border: 0; }
 .ink i { display: block; width: 22px; height: 22px; border-radius: 50%; margin: auto; }
 .grow { flex: 1; }
@@ -69,11 +74,11 @@ class Sketch extends HTMLElement {
       <style>${STYLE}</style>
       <div class="bar">
         ${inks}
-        <button data-act="nib" aria-label="Line width"><span>✏️</span></button>
+        <button data-act="nib" aria-label="Line width"><i class="i" style="--i:url(./icon/brush-outline.svg)"></i></button>
         <span class="grow"></span>
-        <button data-act="undo" aria-label="Undo the last stroke"><span>↩️</span></button>
-        <button data-act="clear" aria-label="Start again"><span>🗑️</span></button>
-        <button data-act="send" aria-label="Send the drawing"><span>➤</span></button>
+        <button data-act="undo" aria-label="Undo the last stroke"><i class="i" style="--i:url(./icon/arrow-undo-outline.svg)"></i></button>
+        <button data-act="clear" aria-label="Start again"><i class="i" style="--i:url(./icon/trash-outline.svg)"></i></button>
+        <button data-act="send" aria-label="Send the drawing"><i class="i" style="--i:url(./icon/send-outline.svg)"></i></button>
       </div>
       <canvas width="${BOARD.width}" height="${BOARD.height}"></canvas>
     `;
@@ -165,3 +170,11 @@ class Sketch extends HTMLElement {
 }
 
 customElements.define("ft-sketch", Sketch);
+
+/** An icon the app lends (`./icon/<name>.svg`): painted in the colour of the app, not a picture. */
+function drawIcon(name) {
+  const made = document.createElement("i");
+  made.className = "i";
+  made.style.setProperty("--i", `url(./icon/${name}.svg)`);
+  return made;
+}
