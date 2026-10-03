@@ -1,6 +1,7 @@
 // The plugin's own tests (Plan §53): the line the finger leaves, and what the drawing is called.
 import { describe, expect, it } from "vitest";
 import { pathOf, penName, strokeAt } from "./dist/index.js";
+import source from "./dist/index.js?raw";
 import manifest from "./module.json";
 
 // The app's languages (plugin-sdk, module.schema.json): English is the top level.
@@ -20,6 +21,13 @@ describe("manifest", () => {
       expect(summary?.trim(), code).toBeTruthy();
       expect(length(summary), code).toBeLessThanOrEqual(200);
     }
+  });
+
+  // What it makes goes to the chat through ft.send or ft.say, which the core refuses without the
+  // send permission (A2): the manifest has to ask for it, or the main action does nothing.
+  it("asks to write in the chat, since it puts its result there", () => {
+    expect(source).toMatch(/\bft\??\.(send|say)\(/);
+    expect(manifest.permissions.send).toBe("propose");
   });
 });
 
