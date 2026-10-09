@@ -36,30 +36,30 @@ const BOARD = { width: 1280, height: 960 };
 const INKS = ["#111111", "#d92b2b", "#1d6fd0", "#e2a400"];
 const NIBS = [4, 10, 22];
 
+// Ionic draws the window (the app lends it to the frame, app 1.6.0); this is only what is the
+// tool's own: the board and the colour swatches. The rest takes the app's colours, through Ionic's
+// variables, in light and dark.
 const STYLE = `
-:host { display: block; font: 14px system-ui, sans-serif; color: #111; --paper: #fff; }
-@media (prefers-color-scheme: dark) { :host { color: #f4f4f4; --paper: #111; } }
-.bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0 10px; }
-button {
-  appearance: none; border: 1px solid currentColor; background: transparent; color: inherit;
-  border-radius: 10px; min-width: 44px; height: 40px; font-size: 18px; cursor: pointer; opacity: .75;
-}
-button.on { opacity: 1; box-shadow: inset 0 0 0 2px currentColor; }
-.i {
-  display: block; width: 22px; height: 22px; margin: auto; background: currentColor;
+ft-sketch { display: flex; flex-direction: column; height: 100%; }
+ft-sketch ion-content { flex: 1; }
+ft-sketch .ft-i {
+  display: block; width: 22px; height: 22px; background: currentColor;
   -webkit-mask: var(--i) center/contain no-repeat; mask: var(--i) center/contain no-repeat;
 }
-button.on .i { background: var(--paper); }
-.ink { border: 0; }
-.ink i { display: block; width: 22px; height: 22px; border-radius: 50%; margin: auto; }
-.grow { flex: 1; }
-canvas { width: 100%; background: #fff; border-radius: 10px; touch-action: none; }
+ft-sketch .swatch { display: block; width: 22px; height: 22px; border-radius: 50%; }
+ft-sketch canvas { width: 100%; background: #fff; border-radius: 10px; touch-action: none; }
 `;
+
+/** An Ionicon in a button: Ionic's own `ion-icon` when the app lent it by name, else the one the
+ *  app serves at `./icon/<name>.svg`, painted in the button's colour. Never a picture of ours. */
+const icon = (name) =>
+  globalThis.Ionicons?.map?.has(name)
+    ? `<ion-icon slot="icon-only" name="${name}" aria-hidden="true"></ion-icon>`
+    : `<i slot="icon-only" class="ft-i" style="--i:url(./icon/${name}.svg)" aria-hidden="true"></i>`;
 
 class Sketch extends HTMLElement {
   constructor() {
     super();
-    this.root = this.attachShadow({ mode: "open" });
     this.strokes = [];
     this.ink = 0;
     this.nib = 1;
@@ -67,23 +67,34 @@ class Sketch extends HTMLElement {
   }
 
   connectedCallback() {
+    // A swatch is the colour itself, not an icon: it keeps the button narrow so the bar fits.
     const inks = INKS.map(
-      (colour, at) => `<button class="ink" data-act="ink" data-at="${at}" aria-label="Colour ${at + 1}"><i style="background:${colour}"></i></button>`,
+      (colour, at) =>
+        `<ion-button data-act="ink" data-at="${at}" aria-label="Colour ${at + 1}"><i class="swatch" style="background:${colour}" aria-hidden="true"></i></ion-button>`,
     ).join("");
-    this.root.innerHTML = `
+    // In the page, not in a shadow root: the frame holds only this tool, and Ionic's global
+    // styles (colours, typography) do not cross a shadow boundary.
+    this.innerHTML = `
       <style>${STYLE}</style>
-      <div class="bar">
-        ${inks}
-        <button data-act="nib" aria-label="Line width"><i class="i" style="--i:url(./icon/brush-outline.svg)"></i></button>
-        <span class="grow"></span>
-        <button data-act="undo" aria-label="Undo the last stroke"><i class="i" style="--i:url(./icon/arrow-undo-outline.svg)"></i></button>
-        <button data-act="clear" aria-label="Start again"><i class="i" style="--i:url(./icon/trash-outline.svg)"></i></button>
-        <button data-act="send" aria-label="Send the drawing"><i class="i" style="--i:url(./icon/send-outline.svg)"></i></button>
-      </div>
-      <canvas width="${BOARD.width}" height="${BOARD.height}"></canvas>
+      <ion-header>
+      <ion-toolbar>
+        <ion-buttons slot="start">
+          ${inks}
+          <ion-button data-act="nib" aria-label="Line width">${icon("brush-outline")}</ion-button>
+        </ion-buttons>
+        <ion-buttons slot="end">
+          <ion-button data-act="undo" aria-label="Undo the last stroke">${icon("arrow-undo-outline")}</ion-button>
+          <ion-button data-act="clear" aria-label="Start again">${icon("trash-outline")}</ion-button>
+          <ion-button data-act="send" aria-label="Send the drawing">${icon("send-outline")}</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <canvas width="${BOARD.width}" height="${BOARD.height}"></canvas>
+      </ion-content>
     `;
-    this.canvas = this.root.querySelector("canvas");
-    this.root.addEventListener("click", (event) => this.onClick(event));
+    this.canvas = this.querySelector("canvas");
+    this.querySelector("ion-toolbar").addEventListener("click", (event) => this.onClick(event));
     this.canvas.addEventListener("pointerdown", (event) => this.onDown(event));
     this.canvas.addEventListener("pointermove", (event) => this.onMove(event));
     this.canvas.addEventListener("pointerup", () => this.onUp());
@@ -92,8 +103,8 @@ class Sketch extends HTMLElement {
   }
 
   onClick(event) {
-    const button = event.target.closest("button");
-    if (!button) return;
+    const button = event.target.closest("ion-button");
+    if (!button || button.disabled) return;
     const { act, at } = button.dataset;
     if (act === "ink") this.ink = Number(at);
     else if (act === "nib") this.nib = (this.nib + 1) % NIBS.length;
@@ -125,10 +136,10 @@ class Sketch extends HTMLElement {
   }
 
   paint() {
-    for (const act of ["ink", "nib"]) {
-      for (const button of this.root.querySelectorAll(`[data-act="${act}"]`)) {
-        button.classList.toggle("on", act === "nib" || Number(button.dataset.at) === this.ink);
-      }
+    for (const button of this.querySelectorAll('[data-act="ink"]')) {
+      const on = Number(button.dataset.at) === this.ink;
+      button.fill = on ? "solid" : undefined;
+      button.setAttribute("aria-pressed", String(on));
     }
     const context = this.canvas.getContext("2d");
     if (!context) return;
@@ -170,11 +181,3 @@ class Sketch extends HTMLElement {
 }
 
 customElements.define("ft-sketch", Sketch);
-
-/** An icon the app lends (`./icon/<name>.svg`): painted in the colour of the app, not a picture. */
-function drawIcon(name) {
-  const made = document.createElement("i");
-  made.className = "i";
-  made.style.setProperty("--i", `url(./icon/${name}.svg)`);
-  return made;
-}
