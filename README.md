@@ -19,6 +19,10 @@ Desde la 1.1.4 la ventana va en los envoltorios de Ionic que la app presta al ma
 FlickerTalk; pide la app 1.6.0 (`minCoreVersion`) y el paquete no lleva Ionic. `@ionic/core` es
 solo `devDependency`, para que los tests pinten lo mismo que el teléfono.
 
+Desde la 1.1.5 el lienzo cabe entero en la ventana con cualquier forma: ocupa la caja 4:3 más grande
+que cabe en el contenido (en horizontal manda el alto, en vertical el ancho), centrada, y el dibujo
+sigue siendo de 1280 × 960 (en una tableta en horizontal se salía por abajo un tercio del lienzo).
+
 ## Desarrollo
 
 ```sh
