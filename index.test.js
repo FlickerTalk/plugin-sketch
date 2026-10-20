@@ -56,6 +56,18 @@ describe("sketch", () => {
     expect(strokeAt({ clientX: 200, clientY: 100 }, box, 400)).toEqual({ x: 200, y: 100 });
   });
 
+  // The board on screen is scaled to fit (issue #5), and its size in whole pixels is not always
+  // exactly 4:3: each axis goes through its own ratio, or the bottom of the drawing drifts.
+  it("finds a point through the board's size on screen along each axis", () => {
+    const box = { left: 10, top: 20, width: 1098, height: 824 };
+    const corner = strokeAt({ clientX: 10 + 1098, clientY: 20 + 824 }, box, 1280, 960);
+    expect(corner.x).toBeCloseTo(1280, 6);
+    expect(corner.y).toBeCloseTo(960, 6);
+    const middle = strokeAt({ clientX: 10 + 549, clientY: 20 + 412 }, box, 1280, 960);
+    expect(middle.x).toBeCloseTo(640, 6);
+    expect(middle.y).toBeCloseTo(480, 6);
+  });
+
   it("names the drawing after the day it was made", () => {
     expect(penName(new Date(2026, 8, 22, 16, 5, 9))).toBe("sketch-20260922-160509.png");
   });
@@ -79,6 +91,73 @@ describe("with the Ionic the app lends", () => {
   afterEach(() => {
     delete globalThis.Ionicons;
     delete globalThis.ft;
+    globalThis.ResizeObserver = realObserver;
+  });
+
+  // The size the content gives the board, as a ResizeObserver tells it: happy-dom lays nothing
+  // out, so the tests say the size themselves.
+  const realObserver = globalThis.ResizeObserver;
+  let watched = [];
+  const watchSizes = () => {
+    watched = [];
+    globalThis.ResizeObserver = class {
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe(target) {
+        watched.push({ target, observer: this });
+      }
+      unobserve() {}
+      disconnect() {}
+    };
+  };
+  const resize = (width, height) => {
+    for (const { target, observer } of watched) observer.callback([{ target, contentRect: { width, height } }], observer);
+  };
+  const shown = (canvas) => ({ width: parseFloat(canvas.style.width), height: parseFloat(canvas.style.height) });
+
+  // Issue #5: on the Lenovo Tab in landscape (1216 × 912 for the window) the board was as wide as
+  // the content and so taller than it, its bottom third off screen. Under the toolbar (56) and
+  // Ionic's padding (16 each side) the content leaves 1184 × 824.
+  it("fits the whole board in the content in landscape: the height is the limit, and it stays 4:3", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    expect(watched.map(({ target }) => target.closest("ion-content"))).toContain(element.querySelector(":scope > ion-content"));
+    resize(1184, 824);
+    const { width, height } = shown(canvas);
+    expect(height).toBeLessThanOrEqual(824);
+    expect(height).toBeGreaterThan(823);
+    expect(width).toBeLessThanOrEqual(1184);
+    expect(width / height).toBeCloseTo(4 / 3, 2);
+    // The drawing keeps its own pixels: only its size on screen changes.
+    expect([canvas.width, canvas.height]).toEqual([1280, 960]);
+  });
+
+  it("fits the board to the width in portrait, and follows the content when it turns", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    resize(736, 880);
+    expect(shown(canvas).width).toBeLessThanOrEqual(736);
+    expect(shown(canvas).width).toBeGreaterThan(735);
+    expect(shown(canvas).width / shown(canvas).height).toBeCloseTo(4 / 3, 2);
+    resize(1184, 824);
+    expect(shown(canvas).height).toBeLessThanOrEqual(824);
+    expect(shown(canvas).height).toBeGreaterThan(823);
+  });
+
+  it("draws where the finger is on the fitted board, to its bottom edge", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    resize(1184, 824);
+    const { width, height } = shown(canvas);
+    canvas.getBoundingClientRect = () => ({ left: 43, top: 72, width, height, right: 43 + width, bottom: 72 + height });
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 43 + width, clientY: 72 + height, bubbles: true }));
+    const [point] = element.strokes[0].points;
+    expect(point.x).toBeCloseTo(1280, 6);
+    expect(point.y).toBeCloseTo(960, 6);
   });
 
   // Only an app that lends Ionic can show it (app 1.6.0): an older one keeps the version it has.
