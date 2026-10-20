@@ -18,10 +18,12 @@ export function pathOf(points) {
   return path;
 }
 
-/** Where the finger is, in the drawing's own pixels. */
-export function strokeAt(event, box, width) {
-  const scale = width / (box.width || 1);
-  return { x: (event.clientX - box.left) * scale, y: (event.clientY - box.top) * scale };
+/** Where the finger is, in the drawing's own pixels: each axis through the board's size on screen
+ *  (`box`), which in whole pixels is not always exactly the drawing's shape. */
+export function strokeAt(event, box, width, height) {
+  const scaleX = width / (box.width || 1);
+  const scaleY = height === undefined ? scaleX : height / (box.height || 1);
+  return { x: (event.clientX - box.left) * scaleX, y: (event.clientY - box.top) * scaleY };
 }
 
 /** What a drawing is called: the day and the time it was made. */
@@ -33,6 +35,18 @@ export function penName(now) {
 
 /** The board, in pixels. Wide enough to read, light enough to send. */
 const BOARD = { width: 1280, height: 960 };
+
+/** The board's size on screen: the largest box of its shape, in whole pixels, that fits in
+ *  `width` × `height`. In landscape the height is the limit, in portrait the width. */
+export function fitBoard(width, height, board = BOARD) {
+  if (width * board.height <= height * board.width) {
+    const fitted = Math.floor(width);
+    return { width: fitted, height: Math.floor((fitted * board.height) / board.width) };
+  }
+  const fitted = Math.floor(height);
+  return { width: Math.floor((fitted * board.width) / board.height), height: fitted };
+}
+
 const INKS = ["#111111", "#d92b2b", "#1d6fd0", "#e2a400"];
 const NIBS = [4, 10, 22];
 
@@ -47,7 +61,8 @@ ft-sketch .ft-i {
   -webkit-mask: var(--i) center/contain no-repeat; mask: var(--i) center/contain no-repeat;
 }
 ft-sketch .swatch { display: block; width: 22px; height: 22px; border-radius: 50%; }
-ft-sketch canvas { width: 100%; background: #fff; border-radius: 10px; touch-action: none; }
+ft-sketch .stage { height: 100%; display: flex; justify-content: center; align-items: flex-start; }
+ft-sketch canvas { display: block; flex: none; max-width: 100%; background: #fff; border-radius: 10px; touch-action: none; }
 `;
 
 /** An Ionicon in a button: Ionic's own `ion-icon` when the app lent it by name, else the one the
@@ -90,16 +105,41 @@ class Sketch extends HTMLElement {
       </ion-toolbar>
       </ion-header>
       <ion-content class="ion-padding">
-        <canvas width="${BOARD.width}" height="${BOARD.height}"></canvas>
+        <div class="stage"><canvas width="${BOARD.width}" height="${BOARD.height}"></canvas></div>
       </ion-content>
     `;
     this.canvas = this.querySelector("canvas");
+    // The whole board on screen, whatever the window's shape (issue #5: in landscape on a tablet
+    // its bottom third was off screen). The stage is the content's area; the board takes the
+    // largest box of its shape in it, and keeps its own pixels for the drawing.
+    this.observer?.disconnect();
+    this.observer = null;
+    if (typeof ResizeObserver === "function") {
+      this.observer = new ResizeObserver((entries) => {
+        const { width, height } = entries[entries.length - 1].contentRect;
+        this.fit(width, height);
+      });
+      this.observer.observe(this.querySelector(".stage"));
+    }
     this.querySelector("ion-toolbar").addEventListener("click", (event) => this.onClick(event));
     this.canvas.addEventListener("pointerdown", (event) => this.onDown(event));
     this.canvas.addEventListener("pointermove", (event) => this.onMove(event));
     this.canvas.addEventListener("pointerup", () => this.onUp());
     this.canvas.addEventListener("pointercancel", () => this.onUp());
     this.paint();
+  }
+
+  disconnectedCallback() {
+    this.observer?.disconnect();
+    this.observer = null;
+  }
+
+  /** Sizes the board on screen for an area of `width` × `height`. */
+  fit(width, height) {
+    if (!(width > 0 && height > 0)) return;
+    const size = fitBoard(width, height);
+    this.canvas.style.width = `${size.width}px`;
+    this.canvas.style.height = `${size.height}px`;
   }
 
   onClick(event) {
@@ -119,7 +159,7 @@ class Sketch extends HTMLElement {
     this.drawing = {
       ink: INKS[this.ink],
       nib: NIBS[this.nib],
-      points: [strokeAt(event, this.canvas.getBoundingClientRect(), BOARD.width)],
+      points: [strokeAt(event, this.canvas.getBoundingClientRect(), BOARD.width, BOARD.height)],
     };
     this.strokes.push(this.drawing);
     this.paint();
@@ -127,7 +167,7 @@ class Sketch extends HTMLElement {
 
   onMove(event) {
     if (!this.drawing) return;
-    this.drawing.points.push(strokeAt(event, this.canvas.getBoundingClientRect(), BOARD.width));
+    this.drawing.points.push(strokeAt(event, this.canvas.getBoundingClientRect(), BOARD.width, BOARD.height));
     this.paint();
   }
 
