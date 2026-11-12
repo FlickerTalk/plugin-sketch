@@ -1,0 +1,235 @@
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { pathOf, penName, strokeAt } from "./dist/index.js";
+import source from "./dist/index.js?raw";
+import manifest from "./module.json";
+
+const languages = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
+
+const length = (text) => [...text].length;
+
+describe("manifest", () => {
+  it("names and sums itself up in every language of the app", () => {
+    expect(Object.keys(manifest.locales ?? {})).toEqual(languages);
+    for (const code of languages) {
+      const { name, summary, ...rest } = manifest.locales[code];
+      expect(rest, code).toEqual({});
+      expect(name?.trim(), code).toBeTruthy();
+      expect(length(name), code).toBeLessThanOrEqual(64);
+      expect(summary?.trim(), code).toBeTruthy();
+      expect(length(summary), code).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it("asks to write in the chat, since it puts its result there", () => {
+    expect(source).toMatch(/\bft\??\.(send|say)\(/);
+    expect(manifest.permissions.send).toBe("propose");
+  });
+});
+
+describe("sketch", () => {
+  it("rounds the line between the points of a stroke", () => {
+    const path = pathOf([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ]);
+    expect(path[0]).toEqual({ to: { x: 0, y: 0 } });
+    expect(path[1]).toEqual({ control: { x: 10, y: 0 }, to: { x: 10, y: 5 } });
+    expect(path[path.length - 1]).toEqual({ control: { x: 10, y: 10 }, to: { x: 10, y: 10 } });
+  });
+
+  it("is a dot when the finger did not move", () => {
+    expect(pathOf([{ x: 4, y: 4 }])).toEqual([{ to: { x: 4, y: 4 } }]);
+    expect(pathOf([])).toEqual([]);
+  });
+
+  it("finds a point in the drawing from where the finger is", () => {
+    const box = { left: 100, top: 50, width: 200 };
+    expect(strokeAt({ clientX: 200, clientY: 100 }, box, 400)).toEqual({ x: 200, y: 100 });
+  });
+
+  it("finds a point through the board's size on screen along each axis", () => {
+    const box = { left: 10, top: 20, width: 1098, height: 824 };
+    const corner = strokeAt({ clientX: 10 + 1098, clientY: 20 + 824 }, box, 1280, 960);
+    expect(corner.x).toBeCloseTo(1280, 6);
+    expect(corner.y).toBeCloseTo(960, 6);
+    const middle = strokeAt({ clientX: 10 + 549, clientY: 20 + 412 }, box, 1280, 960);
+    expect(middle.x).toBeCloseTo(640, 6);
+    expect(middle.y).toBeCloseTo(480, 6);
+  });
+
+  it("names the drawing after the day it was made", () => {
+    expect(penName(new Date(2026, 8, 22, 16, 5, 9))).toBe("sketch-20260922-160509.png");
+  });
+});
+
+describe("with the Ionic the app lends", () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const aria = (button, name) => button.getAttribute(name) ?? button.shadowRoot?.querySelector("button")?.getAttribute(name);
+  let sent = [];
+  const mount = async () => {
+    sent = [];
+    globalThis.ft = { onOpen() {}, send: (...args) => sent.push(args) };
+    document.body.innerHTML = "";
+    const element = document.createElement("ft-sketch");
+    document.body.append(element);
+    await tick();
+    return element;
+  };
+
+  afterEach(() => {
+    delete globalThis.Ionicons;
+    delete globalThis.ft;
+    globalThis.ResizeObserver = realObserver;
+  });
+
+  const realObserver = globalThis.ResizeObserver;
+  let watched = [];
+  const watchSizes = () => {
+    watched = [];
+    globalThis.ResizeObserver = class {
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe(target) {
+        watched.push({ target, observer: this });
+      }
+      unobserve() {}
+      disconnect() {}
+    };
+  };
+  const resize = (width, height) => {
+    for (const { target, observer } of watched) observer.callback([{ target, contentRect: { width, height } }], observer);
+  };
+  const shown = (canvas) => ({ width: parseFloat(canvas.style.width), height: parseFloat(canvas.style.height) });
+
+  it("fits the whole board in the content in landscape: the height is the limit, and it stays 4:3", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    expect(watched.map(({ target }) => target.closest("ion-content"))).toContain(element.querySelector(":scope > ion-content"));
+    resize(1184, 824);
+    const { width, height } = shown(canvas);
+    expect(height).toBeLessThanOrEqual(824);
+    expect(height).toBeGreaterThan(823);
+    expect(width).toBeLessThanOrEqual(1184);
+    expect(width / height).toBeCloseTo(4 / 3, 2);
+    expect([canvas.width, canvas.height]).toEqual([1280, 960]);
+  });
+
+  it("fits the board to the width in portrait, and follows the content when it turns", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    resize(736, 880);
+    expect(shown(canvas).width).toBeLessThanOrEqual(736);
+    expect(shown(canvas).width).toBeGreaterThan(735);
+    expect(shown(canvas).width / shown(canvas).height).toBeCloseTo(4 / 3, 2);
+    resize(1184, 824);
+    expect(shown(canvas).height).toBeLessThanOrEqual(824);
+    expect(shown(canvas).height).toBeGreaterThan(823);
+  });
+
+  it("draws where the finger is on the fitted board, to its bottom edge", async () => {
+    watchSizes();
+    const element = await mount();
+    const canvas = element.querySelector("canvas");
+    resize(1184, 824);
+    const { width, height } = shown(canvas);
+    canvas.getBoundingClientRect = () => ({ left: 43, top: 72, width, height, right: 43 + width, bottom: 72 + height });
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, clientX: 43 + width, clientY: 72 + height, bubbles: true }));
+    const [point] = element.strokes[0].points;
+    expect(point.x).toBeCloseTo(1280, 6);
+    expect(point.y).toBeCloseTo(960, 6);
+  });
+
+  it("asks for an app that lends Ionic", () => {
+    expect(manifest.minCoreVersion).toBe("1.6.0");
+  });
+
+  it("draws in the page, not in a shadow root, so Ionic's own styles reach it", async () => {
+    const element = await mount();
+    expect(element.shadowRoot).toBe(null);
+    expect(element.querySelector(":scope > ion-header > ion-toolbar")).toBeTruthy();
+    expect(element.querySelector(":scope > ion-content canvas")).toBeTruthy();
+  });
+
+  it("has every action as an Ionic button in its toolbar, each with a label", async () => {
+    const element = await mount();
+    const acts = [...element.querySelectorAll("ion-toolbar ion-button")].map((button) => button.dataset.act);
+    expect(acts).toEqual(["ink", "ink", "ink", "ink", "nib", "undo", "clear", "send"]);
+    for (const button of element.querySelectorAll("ion-toolbar ion-button")) expect(aria(button, "aria-label"), button.dataset.act).toBeTruthy();
+    expect(element.querySelector("button")).toBe(null);
+  });
+
+  it("shows the colour in use as the pressed one of the swatches", async () => {
+    const element = await mount();
+    const inks = () => [...element.querySelectorAll('ion-button[data-act="ink"]')];
+    const pressed = () => inks().filter((button) => aria(button, "aria-pressed") === "true").map((button) => button.dataset.at);
+    expect(pressed()).toEqual(["0"]);
+    expect(inks()[0].fill).toBe("solid");
+    inks()[2].click();
+    await tick();
+    expect(element.ink).toBe(2);
+    expect(pressed()).toEqual(["2"]);
+    expect(inks()[2].fill).toBe("solid");
+    expect(inks()[0].fill).toBe(undefined);
+  });
+
+  it("changes the line, undoes, starts again and sends from its buttons", async () => {
+    const element = await mount();
+    const button = (act) => element.querySelector(`ion-button[data-act="${act}"]`);
+    button("nib").click();
+    expect(element.nib).toBe(2);
+    element.strokes.push({ ink: "#111111", nib: 4, points: [{ x: 1, y: 1 }] }, { ink: "#111111", nib: 4, points: [{ x: 2, y: 2 }] });
+    button("undo").click();
+    expect(element.strokes).toHaveLength(1);
+    button("send").click();
+    expect(sent).toHaveLength(1);
+    button("clear").click();
+    expect(element.strokes).toHaveLength(0);
+  });
+
+  it("draws an Ionicon the app lent by name with ion-icon, and the one it serves otherwise", async () => {
+    let element = await mount();
+    expect(element.querySelector('[data-act="nib"] ion-icon')).toBe(null);
+    expect(element.querySelector('[data-act="nib"] [slot="icon-only"]').getAttribute("style")).toContain("./icon/brush-outline.svg");
+
+    globalThis.Ionicons = { map: new Map([["brush-outline", "data:image/svg+xml;utf8,<svg></svg>"]]) };
+    element = await mount();
+    expect(element.querySelector('[data-act="nib"] ion-icon[slot="icon-only"]').getAttribute("name")).toBe("brush-outline");
+  });
+});
+
+describe("the package", () => {
+  const dist = join(import.meta.dirname, "dist");
+  const files = readdirSync(dist);
+
+  it("carries no Ionic of its own", () => {
+    for (const file of files) {
+      const code = readFileSync(join(dist, file), "utf8");
+      expect(code, file).not.toMatch(/@ionic\/core|ionicframework|stencil|defineCustomElement|__registerHost/i);
+      expect(code, file).not.toMatch(/^\s*import\s.*from\s+["'](?!\.\/)/m);
+    }
+  });
+
+  it("is small enough to be a seed", () => {
+    const bytes = files.reduce((sum, file) => sum + statSync(join(dist, file)).size, 0);
+    expect(bytes).toBeLessThanOrEqual(128 * 1024);
+  });
+});
+
+describe("the image of the Apps grid", () => {
+  const image = join(import.meta.dirname, "icon.svg");
+
+  it("is a square 64 × 64 SVG of at most 4 KB at the root of the package, and not inside dist/", () => {
+    expect(existsSync(image), "icon.svg").toBe(true);
+    expect(statSync(image).size).toBeLessThanOrEqual(4096);
+    const svg = readFileSync(image, "utf8");
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(svg).toContain('viewBox="0 0 64 64"');
+    expect(existsSync(join(import.meta.dirname, "dist", "icon.svg"))).toBe(false);
+  });
+});
